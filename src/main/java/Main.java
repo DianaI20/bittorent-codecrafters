@@ -45,6 +45,10 @@ public class Main {
             return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.LIST);
         }
 
+        if (bencodedString.charAt(0) == 'd') {
+            return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.DICTIONARY);
+        }
+
         return null;
     }
 
