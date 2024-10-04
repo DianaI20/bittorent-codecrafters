@@ -1,13 +1,12 @@
 import com.dampcake.bencode.Type;
 import com.google.gson.Gson;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 import com.dampcake.bencode.Bencode;// - available if you need it!
@@ -16,7 +15,8 @@ import javax.sound.midi.Soundbank;
 
 public class Main {
     private static final Gson gson = new Gson();
-    private static final Bencode bencode = new Bencode();
+    private static final Bencode bencode = new Bencode(false);
+    private static final Bencode bencode1 = new Bencode(true);
 
     public static void main(String[] args) throws Exception {
         // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -36,8 +36,10 @@ public class Main {
             case "info":
                 Object parsedTorrentFile = parseTorrentFile(args[1]);
                 System.out.println(gson.toJson(parsedTorrentFile));
+                break;
             default:
                 System.out.println("Unknown command: " + command);
+                break;
         }
     }
 
@@ -65,23 +67,34 @@ public class Main {
         return "Invalid decode string";
     }
 
-    static Object parseTorrentFile(String fileName) {
-        try {
+    static List<Object> parseTorrentFile(String fileName) throws IOException, NoSuchAlgorithmException {
 
-            byte[] input = Files.readAllBytes(Paths.get(fileName));
+        byte[] input = Files.readAllBytes(Paths.get(fileName));
 
-            Map<String, Object> decoded = bencode.decode(input, Type.DICTIONARY);
-            List<Object> output = new ArrayList<>();
-            output.add("Tracker URL: " + decoded.get("announce"));
-            output.add("Length: " + ((Map<String, Object>) decoded.get("info")).get("length"));
+        Map<String, Object> decoded = bencode.decode(input, Type.DICTIONARY);
+        List<Object> output = new ArrayList<>();
+        Map<String, Object> info = (Map<String, Object>) decoded.get("info");
 
-            return output;
-        } catch (FileNotFoundException e) {
-            System.out.println("File was not found");
-        } catch (IOException e) {
-            System.out.println("Cannot read from file");
+        output.add("Tracker URL: " + decoded.get("announce"));
+        output.add("Length: " + info.get("length"));
+        output.add("Info Hash: " + calculateInfoHash(bencode1.encode(
+                (Map<String, Object>)bencode1.decode(input, Type.DICTIONARY)
+                        .get("info"))));
+
+        return output;
+    }
+
+    static String calculateInfoHash(byte[] info) throws IOException, NoSuchAlgorithmException {
+
+        MessageDigest md = MessageDigest.getInstance("SHA-1");
+        byte[] digest = md.digest(info);
+
+        StringBuilder hexString = new StringBuilder();
+
+        for (byte b : digest) {
+            hexString.append(String.format("%02x", b));
         }
 
-        return null;
+        return hexString.toString();
     }
 }
