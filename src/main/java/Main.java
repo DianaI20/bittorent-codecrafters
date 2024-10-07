@@ -2,6 +2,8 @@ import com.dampcake.bencode.Type;
 import com.google.gson.Gson;
 
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -18,6 +20,7 @@ public class Main {
     private static final Bencode bencode = new Bencode(false);
     private static final Bencode bencode1 = new Bencode(true);
 
+
     public static void main(String[] args) throws Exception {
         // You can use print statements as follows for debugging, they'll be visible when running tests.
         String command = args[0];
@@ -32,10 +35,12 @@ public class Main {
                     return;
                 }
                 System.out.println(gson.toJson(decoded));
+
                 break;
             case "info":
                 Object parsedTorrentFile = parseTorrentFile(args[1]);
                 System.out.println(gson.toJson(parsedTorrentFile));
+                printPieceHashes(args[1]);
                 break;
             default:
                 System.out.println("Unknown command: " + command);
@@ -48,20 +53,20 @@ public class Main {
     static Object decodeBencode(String bencodedString) {
 
         if (Character.isDigit(bencodedString.charAt(0))) {
-            return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.STRING);
+            return bencode.decode(bencodedString.getBytes(), Type.STRING);
         }
 
         if (bencodedString.charAt(0) == 'i' && bencodedString.charAt(bencodedString.length() - 1) == 'e') {
-            return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.NUMBER);
+            return bencode.decode(bencodedString.getBytes(), Type.NUMBER);
 
         }
 
         if (bencodedString.charAt(0) == 'l' && bencodedString.charAt(bencodedString.length() - 1) == 'e') {
-            return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.LIST);
+            return bencode.decode(bencodedString.getBytes(), Type.LIST);
         }
 
         if (bencodedString.charAt(0) == 'd') {
-            return bencode.decode(bencodedString.getBytes(StandardCharsets.UTF_8), Type.DICTIONARY);
+            return bencode.decode(bencodedString.getBytes(), Type.DICTIONARY);
         }
 
         return "Invalid decode string";
@@ -78,8 +83,10 @@ public class Main {
         output.add("Tracker URL: " + decoded.get("announce"));
         output.add("Length: " + info.get("length"));
         output.add("Info Hash: " + calculateInfoHash(bencode1.encode(
-                (Map<String, Object>)bencode1.decode(input, Type.DICTIONARY)
+                (Map<String, Object>) bencode1.decode(input, Type.DICTIONARY)
                         .get("info"))));
+
+
 
         return output;
     }
@@ -89,12 +96,53 @@ public class Main {
         MessageDigest md = MessageDigest.getInstance("SHA-1");
         byte[] digest = md.digest(info);
 
+        return getHexString(digest);
+    }
+
+    static void printPieceHashes(String fileName) throws IOException {
+
+        byte[] input = Files.readAllBytes(Paths.get(fileName));
+      //  System.out.println(getHexString(input));
+
+        Map<?, ?> decoded = bencode1.decode(input, Type.DICTIONARY);
+        Map<String, ?> info = (Map<String, ?>) decoded.get("info");
+
+        ByteBuffer piecesString = (ByteBuffer) info.get("pieces");
+        System.out.println("Piece Length: " + info.get("piece length"));
+        System.out.println("Piece hashes: ");
+        System.out.println("ByteBuffer content (20 bytes at a time):");
+        while (piecesString.hasRemaining()) {
+            // Determine how many bytes to print (up to 20)
+            int chunkSize = Math.min(20, piecesString.remaining());
+
+            // Print 20 bytes in one iteration
+            for (int i = 0; i < chunkSize; i++) {
+                byte b = piecesString.get();
+                System.out.printf("%02x", b);  // Print byte in hexadecimal format
+            }
+            System.out.println();  // New line after printing 20 bytes
+        }
+    }
+
+    static String getHexString(byte[] bytes) {
+
         StringBuilder hexString = new StringBuilder();
 
-        for (byte b : digest) {
+        for (byte b : bytes) {
             hexString.append(String.format("%02x", b));
         }
 
         return hexString.toString();
+    }
+
+    public static byte[] convertObjectToBytes(Object obj) {
+        ByteArrayOutputStream boas = new ByteArrayOutputStream();
+        try (ObjectOutputStream ois = new ObjectOutputStream(boas)) {
+            ois.writeObject(obj);
+            return boas.toByteArray();
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+        }
+        throw new RuntimeException();
     }
 }
