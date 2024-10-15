@@ -1,19 +1,24 @@
+import com.dampcake.bencode.Bencode;
 import com.dampcake.bencode.Type;
 import com.google.gson.Gson;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.lang.reflect.Array;
+import java.math.BigInteger;
+import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-
-import com.dampcake.bencode.Bencode;// - available if you need it!
-
-import javax.sound.midi.Soundbank;
 
 public class Main {
     private static final Gson gson = new Gson();
@@ -41,6 +46,12 @@ public class Main {
                 Object parsedTorrentFile = parseTorrentFile(args[1]);
                 System.out.println(gson.toJson(parsedTorrentFile));
                 printPieceHashes(args[1]);
+                break;
+            case "peers":
+                Map<String, String> params = createParamsMap(args[1]);
+                String tracker = params.get("tracker");
+                params.remove("tracker");
+                makeRequestToTracker(tracker, params);
                 break;
             default:
                 System.out.println("Unknown command: " + command);
@@ -82,27 +93,25 @@ public class Main {
 
         output.add("Tracker URL: " + decoded.get("announce"));
         output.add("Length: " + info.get("length"));
-        output.add("Info Hash: " + calculateInfoHash(bencode1.encode(
+        output.add("Info Hash: " + getHexString(calculateInfoHash(bencode1.encode(
                 (Map<String, Object>) bencode1.decode(input, Type.DICTIONARY)
-                        .get("info"))));
-
+                        .get("info")))));
 
 
         return output;
     }
 
-    static String calculateInfoHash(byte[] info) throws IOException, NoSuchAlgorithmException {
+    static byte[] calculateInfoHash(byte[] info) throws IOException, NoSuchAlgorithmException {
 
         MessageDigest md = MessageDigest.getInstance("SHA-1");
         byte[] digest = md.digest(info);
 
-        return getHexString(digest);
+        return digest;
     }
 
     static void printPieceHashes(String fileName) throws IOException {
 
         byte[] input = Files.readAllBytes(Paths.get(fileName));
-      //  System.out.println(getHexString(input));
 
         Map<?, ?> decoded = bencode1.decode(input, Type.DICTIONARY);
         Map<String, ?> info = (Map<String, ?>) decoded.get("info");
@@ -135,14 +144,75 @@ public class Main {
         return hexString.toString();
     }
 
-    public static byte[] convertObjectToBytes(Object obj) {
-        ByteArrayOutputStream boas = new ByteArrayOutputStream();
-        try (ObjectOutputStream ois = new ObjectOutputStream(boas)) {
-            ois.writeObject(obj);
-            return boas.toByteArray();
-        } catch (IOException ioe) {
-            ioe.printStackTrace();
+    static void makeRequestToTracker(String tracker, Map<String, String> params) throws IOException {
+
+        StringBuilder paramStringBuilder = new StringBuilder(tracker);
+        paramStringBuilder.append("/?");
+        params.remove("tracker");
+        for (Map.Entry<String, String> entrySet : params.entrySet()) {
+            paramStringBuilder.append(entrySet.getKey()).append("=").append(entrySet.getValue()).append("&");
         }
-        throw new RuntimeException();
+        System.out.println(paramStringBuilder.toString());
+
+        URL url = new URL(paramStringBuilder.toString());
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setRequestMethod("GET");
+        byte[] byteArray = null;
+
+        try {
+            byteArray = con.getInputStream().readAllBytes();
+        }
+
+        // Catch block to handle the exceptions
+        catch (IOException e) {
+
+            // Print and display the exceptions
+            System.out.println(e);
+        }
+        Map<?, ?> contentDecoded = bencode1.decode(byteArray, Type.DICTIONARY);
+        ByteBuffer peers = (ByteBuffer) contentDecoded.get("peers");
+     //   InetAddress ipAddress = InetAddress.getByAddress();
+//        byte[] ip = new byte[]{peers.get(0),
+//                peers.get(1), peers.get(2), peers.get(3) };
+      //  byte[] port = new byte[]{peers.get(4), peers.get(5)};
+    //    InetAddress ipAddress = InetAddress.getByAddress(ip);
+
+
+        while (peers.hasRemaining()) {
+            byte[] p = new byte[6];
+
+            for (int i = 0; i < 6; i++) {
+                byte b = peers.get();
+                p[i] = b;
+            }
+
+            InetAddress ipAddress = InetAddress.getByAddress(Arrays.copyOfRange(p,0,4));
+            byte[] port = new byte[]{p[4], p[5]};
+            int value = (((port[0] & 0xFF) << 8) | (port[1] & 0xFF));
+            System.out.println(ipAddress.getHostAddress() + ":" + value);
+        }
+
+    }
+
+    static Map<String, String> createParamsMap(String fileName) throws IOException, NoSuchAlgorithmException {
+        Map<String, String> paramsMap = new HashMap<>();
+
+        byte[] input = Files.readAllBytes(Paths.get(fileName));
+
+        Map<String, Object> decoded = bencode.decode(input, Type.DICTIONARY);
+        Map<String, Object> info = (Map<String, Object>) decoded.get("info");
+
+        byte[] infoHash = calculateInfoHash(bencode1.encode((Map<String, Object>) bencode1.decode(input, Type.DICTIONARY).get("info")));
+        String encodedHash = URLEncoder.encode(new String(infoHash, StandardCharsets.ISO_8859_1), StandardCharsets.ISO_8859_1);
+        paramsMap.put("tracker", (String) decoded.get("announce"));
+        paramsMap.put("info_hash", encodedHash);
+        paramsMap.put("peer_id", "my_unique_id_very_fa");
+        paramsMap.put("port", "6681");
+        paramsMap.put("uploaded", "0");
+        paramsMap.put("downloaded", "0");
+        paramsMap.put("left", "" + input.length);
+        paramsMap.put("compact", "1");
+
+        return paramsMap;
     }
 }
