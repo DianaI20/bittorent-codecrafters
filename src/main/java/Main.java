@@ -2,17 +2,10 @@ import com.dampcake.bencode.Bencode;
 import com.dampcake.bencode.Type;
 import com.google.gson.Gson;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.lang.reflect.Array;
-import java.math.BigInteger;
-import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.URL;
-import java.net.URLEncoder;
+import java.net.*;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -25,10 +18,10 @@ public class Main {
     private static final Bencode bencode = new Bencode(false);
     private static final Bencode bencode1 = new Bencode(true);
 
-
     public static void main(String[] args) throws Exception {
         // You can use print statements as follows for debugging, they'll be visible when running tests.
         String command = args[0];
+        TorrentFile parsedTorrentFile;
         switch (command) {
             case "decode":
                 String bencodedValue = args[1];
@@ -43,9 +36,8 @@ public class Main {
 
                 break;
             case "info":
-                Object parsedTorrentFile = parseTorrentFile(args[1]);
-                System.out.println(gson.toJson(parsedTorrentFile));
-                printPieceHashes(args[1]);
+                parsedTorrentFile = parseTorrentFile(args[1]);
+                printTorrentFileInfo(parsedTorrentFile);
                 break;
             case "peers":
                 Map<String, String> params = createParamsMap(args[1]);
@@ -53,13 +45,16 @@ public class Main {
                 params.remove("tracker");
                 makeRequestToTracker(tracker, params);
                 break;
+            case "handshake":
+                parsedTorrentFile = parseTorrentFile(args[1]);
+                String[] peerInfo = getIpAdressAndPort(args[2]);
+                connectToPeer(peerInfo[0], peerInfo[1], parsedTorrentFile);
+                break;
             default:
                 System.out.println("Unknown command: " + command);
                 break;
         }
     }
-
-    //TODO : implemement Bencode object algorithms
 
     static Object decodeBencode(String bencodedString) {
 
@@ -83,22 +78,24 @@ public class Main {
         return "Invalid decode string";
     }
 
-    static List<Object> parseTorrentFile(String fileName) throws IOException, NoSuchAlgorithmException {
+    static TorrentFile parseTorrentFile(String fileName) throws IOException, NoSuchAlgorithmException {
 
+        TorrentFile torrentFile = new TorrentFile();
         byte[] input = Files.readAllBytes(Paths.get(fileName));
 
         Map<String, Object> decoded = bencode.decode(input, Type.DICTIONARY);
-        List<Object> output = new ArrayList<>();
         Map<String, Object> info = (Map<String, Object>) decoded.get("info");
+        torrentFile.setTrackerUrl((String) decoded.get("announce"));
+        torrentFile.setLength((Long) info.get("length"));
+        torrentFile.setInfoHash(calculateInfoHash(
+                        bencode1.encode(
+                                (Map<String, Object>) bencode1.decode(input, Type.DICTIONARY).get("info")
+                        )));
+        torrentFile.setPieceLength((Long) info.get("piece length"));
 
-        output.add("Tracker URL: " + decoded.get("announce"));
-        output.add("Length: " + info.get("length"));
-        output.add("Info Hash: " + getHexString(calculateInfoHash(bencode1.encode(
-                (Map<String, Object>) bencode1.decode(input, Type.DICTIONARY)
-                        .get("info")))));
+        addPieceHashes(input, torrentFile);
 
-
-        return output;
+        return torrentFile;
     }
 
     static byte[] calculateInfoHash(byte[] info) throws IOException, NoSuchAlgorithmException {
@@ -109,27 +106,24 @@ public class Main {
         return digest;
     }
 
-    static void printPieceHashes(String fileName) throws IOException {
-
-        byte[] input = Files.readAllBytes(Paths.get(fileName));
+    static void addPieceHashes(byte[] input, TorrentFile file) throws IOException {
 
         Map<?, ?> decoded = bencode1.decode(input, Type.DICTIONARY);
         Map<String, ?> info = (Map<String, ?>) decoded.get("info");
 
         ByteBuffer piecesString = (ByteBuffer) info.get("pieces");
-        System.out.println("Piece Length: " + info.get("piece length"));
-        System.out.println("Piece hashes: ");
-        System.out.println("ByteBuffer content (20 bytes at a time):");
+        StringBuilder stringBuilder;
         while (piecesString.hasRemaining()) {
             // Determine how many bytes to print (up to 20)
             int chunkSize = Math.min(20, piecesString.remaining());
-
+            stringBuilder = new StringBuilder();
             // Print 20 bytes in one iteration
             for (int i = 0; i < chunkSize; i++) {
                 byte b = piecesString.get();
-                System.out.printf("%02x", b);  // Print byte in hexadecimal format
+                stringBuilder.append(String.format("%02x", b));
+
             }
-            System.out.println();  // New line after printing 20 bytes
+            file.addPieceHash(stringBuilder.toString());
         }
     }
 
@@ -161,22 +155,11 @@ public class Main {
 
         try {
             byteArray = con.getInputStream().readAllBytes();
-        }
-
-        // Catch block to handle the exceptions
-        catch (IOException e) {
-
-            // Print and display the exceptions
+        } catch (IOException e) {
             System.out.println(e);
         }
         Map<?, ?> contentDecoded = bencode1.decode(byteArray, Type.DICTIONARY);
         ByteBuffer peers = (ByteBuffer) contentDecoded.get("peers");
-     //   InetAddress ipAddress = InetAddress.getByAddress();
-//        byte[] ip = new byte[]{peers.get(0),
-//                peers.get(1), peers.get(2), peers.get(3) };
-      //  byte[] port = new byte[]{peers.get(4), peers.get(5)};
-    //    InetAddress ipAddress = InetAddress.getByAddress(ip);
-
 
         while (peers.hasRemaining()) {
             byte[] p = new byte[6];
@@ -186,7 +169,7 @@ public class Main {
                 p[i] = b;
             }
 
-            InetAddress ipAddress = InetAddress.getByAddress(Arrays.copyOfRange(p,0,4));
+            InetAddress ipAddress = InetAddress.getByAddress(Arrays.copyOfRange(p, 0, 4));
             byte[] port = new byte[]{p[4], p[5]};
             int value = (((port[0] & 0xFF) << 8) | (port[1] & 0xFF));
             System.out.println(ipAddress.getHostAddress() + ":" + value);
@@ -197,7 +180,7 @@ public class Main {
     static Map<String, String> createParamsMap(String fileName) throws IOException, NoSuchAlgorithmException {
         Map<String, String> paramsMap = new HashMap<>();
 
-        byte[] input = Files.readAllBytes(Paths.get(fileName));
+        byte[] input = getBytesFromFile(fileName);
 
         Map<String, Object> decoded = bencode.decode(input, Type.DICTIONARY);
         Map<String, Object> info = (Map<String, Object>) decoded.get("info");
@@ -214,5 +197,74 @@ public class Main {
         paramsMap.put("compact", "1");
 
         return paramsMap;
+    }
+
+    static byte[] getBytesFromFile(String fileName) throws IOException {
+        return Files.readAllBytes(Paths.get(fileName));
+    }
+
+    static void printTorrentFileInfo(TorrentFile torrentFile) {
+
+        System.out.println("Tracker URL: " + torrentFile.getTrackerUrl());
+        System.out.println("Length: " + torrentFile.getLength());
+        System.out.println("Info Hash: " + getHexString(torrentFile.getInfoHash()));
+        System.out.println("Piece Length: " + torrentFile.getPieceLength());
+        System.out.println("Piece hashes: ");
+
+        torrentFile.getPieceHashes().forEach(
+                (pieceHash) -> {
+                    System.out.println(pieceHash);
+                }
+        );
+        System.out.println("ByteBuffer content (20 bytes at a time):");
+    }
+
+    static void connectToPeer(String ipAddress, String port, TorrentFile torrentFile) throws IOException {
+        InetAddress ip = InetAddress.getByName(ipAddress);
+        int portValue = Integer.parseInt(port);
+
+        Socket socket = new Socket(ip,portValue);
+
+        //PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+
+        // Setup input stream to receive data from the server
+        socket.getOutputStream().write(generateMessageForPeer(torrentFile.getInfoHash()));
+        byte[] response = socket.getInputStream().readAllBytes();
+        byte[] peerId = Arrays.copyOfRange(response, 48, 68  );
+        System.out.println("Peer ID: " + getHexString(peerId));
+
+        // Close the socket
+        socket.close();
+    }
+
+    static byte[] generateMessageForPeer(byte[] infoHash) {
+
+        byte[] lengthArray = {19};
+        byte[] bittorentBytes =  "BitTorrent protocol".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] zeroBytes = {0, 0, 0, 0, 0,0 ,0,0};
+        byte[] randomPeerId = generateRandomBytes(20);
+        int length = lengthArray.length + bittorentBytes.length + zeroBytes.length + randomPeerId.length + infoHash.length;
+
+        byte[] message = new byte[length];
+
+        ByteBuffer byteBuffer =  ByteBuffer.wrap(message);
+        byteBuffer.put(lengthArray);
+        byteBuffer.put(bittorentBytes);
+        byteBuffer.put(zeroBytes);
+        byteBuffer.put(infoHash);
+        byteBuffer.put(randomPeerId);
+
+        return byteBuffer.array();
+    }
+
+    static byte[] generateRandomBytes(int length) {
+        byte[] b = new byte[length];
+        new Random().nextBytes(b);
+
+        return b;
+    }
+
+    static String[] getIpAdressAndPort(String value) {
+        return value.split(":");
     }
 }
