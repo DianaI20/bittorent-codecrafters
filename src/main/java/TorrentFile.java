@@ -1,5 +1,6 @@
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class TorrentFile {
 
@@ -7,49 +8,72 @@ public class TorrentFile {
     private Long length;
     private byte[] infoHash;
     private List<String> pieceHashes;
-
-    public Long getPieceLength() {
-        return pieceLength;
-    }
-
-    public void setPieceLength(Long pieceLength) {
-        this.pieceLength = pieceLength;
-    }
-
+    private Map<?, ?> info;
     private Long pieceLength;
 
     public TorrentFile() {
         pieceHashes = new ArrayList<>();
     }
 
+    public Long getPieceLength() {
+        return pieceLength;
+    }
+
+    public TorrentFile setPieceLength(Long pieceLength) {
+        this.pieceLength = pieceLength;
+
+        return this;
+    }
+
     public String getTrackerUrl() {
         return trackerUrl;
     }
 
-    public void setTrackerUrl(String trackerUrl) {
+    public TorrentFile setTrackerUrl(String trackerUrl) {
         this.trackerUrl = trackerUrl;
+
+        return this;
     }
 
     public Long getLength() {
         return length;
     }
 
-    public void setLength(Long length) {
+    public TorrentFile setLength(Long length) {
         this.length = Long.valueOf(length);
+
+        return this;
     }
 
     public byte[] getInfoHash() {
         return infoHash;
     }
 
-    public void setInfoHash(byte[] infoHash) {
+    public TorrentFile setInfoHash(byte[] infoHash) {
         this.infoHash = infoHash;
+
+        return this;
     }
 
     public List<String> getPieceHashes() {
         return pieceHashes;
     }
 
+    public TorrentFile setPieceHashes(List<String> pieceHashes) {
+        this.pieceHashes = pieceHashes;
+
+        return this;
+    }
+
+    public Map<?, ?> getInfo() {
+        return info;
+    }
+
+    public TorrentFile setInfo(Map<?, ?> info) {
+        this.info = info;
+
+        return this;
+    }
     public TorrentFile addPieceHash(String pieceHash) {
         this.pieceHashes.add(pieceHash);
 
